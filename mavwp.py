@@ -642,3 +642,108 @@ class MAVFenceLoader(object):
             for fp in self.points[1:]:
                     points.append((fp.lat, fp.lng))
             return points
+
+class MAVSwarmLoader(object):
+    '''MAVLink swarm loader'''
+    def __init__(self, target_system=0, target_component=0):
+        self.points = []
+        self.target_system = target_system
+        self.target_component = target_component
+        self.last_change = time.time()
+
+    def count(self):
+        '''return number of points'''
+        return len(self.points)
+
+    def point(self, i):
+        '''return a point'''
+        return self.points[i]
+
+    def add(self, p):
+        '''add a point'''
+        self.points.append(p)
+        self.reindex()
+
+    def reindex(self):
+        '''reindex waypoints'''
+        for i in range(self.count()):
+            w = self.points[i]
+            w.idx = i
+            w.count = self.count()
+            w.target_system = self.target_system
+            w.target_component = self.target_component
+        self.last_change = time.time()
+
+    def add_latlon(self, lat, lon):
+        '''add a point via latitude/longitude'''
+        p = mavutil.mavlink.MAVLink_swarm_point_message(self.target_system, self.target_component,
+                                                        self.count(), 0, lat, lon)
+        self.add(p)
+
+    def clear(self):
+        '''clear point list'''
+        self.points = []
+        self.last_change = time.time()
+
+    def load(self, filename):
+        '''load swarm points from a file.
+        returns number of points loaded'''
+        f = open(filename, mode='r')
+        self.clear()
+        for line in f:
+            if line.startswith('#'):
+                continue
+            line = line.strip()
+            if not line:
+                continue
+            a = line.split()
+            if len(a) != 2:
+                raise MAVFenceError("invalid fence point line: %s" % line)
+            self.add_latlon(float(a[0]), float(a[1]))
+        f.close()
+        return len(self.points)
+
+    def save(self, filename):
+        '''save swarm points to a file'''
+        f = open(filename, mode='w')
+        for p in self.points:
+            f.write("%f\t%f\n" % (p.lat, p.lng))
+        f.close()
+
+    def move(self, i, lat, lng, change_time=True):
+        '''move a swarm point'''
+        if i < 0 or i >= self.count():
+            print("Invalid swarm point number %u" % i)
+        self.points[i].lat = lat
+        self.points[i].lng = lng
+        # ensure we close the polygon
+        if i == 1:
+                self.points[self.count()-1].lat = lat
+                self.points[self.count()-1].lng = lng
+        if i == self.count() - 1:
+                self.points[1].lat = lat
+                self.points[1].lng = lng
+        if change_time:
+            self.last_change = time.time()
+
+    def remove(self, i, change_time=True):
+        '''remove a swarm point'''
+        if i < 0 or i >= self.count():
+            print("Invalid swarm point number %u" % i)
+        self.points.pop(i)
+         # ensure we close the polygon
+        if i == 1:
+                self.points[self.count()-1].lat = self.points[1].lat
+                self.points[self.count()-1].lng = self.points[1].lng
+        if i == self.count():
+                self.points[1].lat = self.points[self.count()-1].lat
+                self.points[1].lng = self.points[self.count()-1].lng
+        if change_time:
+            self.last_change = time.time()
+
+    def polygon(self):
+            '''return a polygon for the swarm'''
+            points = []
+            for fp in self.points[0:]:
+                    points.append((fp.lat, fp.lng))
+            return points
